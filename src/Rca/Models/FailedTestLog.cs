@@ -12,8 +12,13 @@ public record FailedTestLog(
     List<LogEntry>? Logs
 )
 {
-    public string ErrorMessage => Failure?.Messages?.FirstOrDefault() ?? "Unknown error";
-    public string? StackTrace => Failure?.StackTraces?.FirstOrDefault();
+    public string ErrorMessage => Failure?.Messages is { Length: > 0 }
+        ? string.Join("\n", Failure.Messages)
+        : "Unknown error";
+
+    public string? StackTrace => Failure?.StackTraces is { Length: > 0 }
+        ? string.Join("\n---\n", Failure.StackTraces)
+        : null;
 }
 
 public record FailureInfo(string[] Messages, string[]? StackTraces);
