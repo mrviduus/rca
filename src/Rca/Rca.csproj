@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- Tool -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>rca</ToolCommandName>
+
+    <!-- NuGet -->
+    <PackageId>rca-cli</PackageId>
+    <Title>RCA - Root Cause Analyzer</Title>
+    <Description>CLI tool for analyzing failed test logs using LLM providers (OpenAI, Claude, Gemini, Ollama)</Description>
+    <Authors>mrviduus</Authors>
+    <PackageTags>cli;testing;llm;openai;claude;gemini;rca;root-cause-analysis</PackageTags>
+    <PackageProjectUrl>https://github.com/mrviduus/rca</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/mrviduus/rca</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="Microsoft.Extensions.AI" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
+    <PackageReference Include="GeminiDotnet.Extensions.AI" />
+    <PackageReference Include="Anthropic.SDK" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Prompts\*.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
