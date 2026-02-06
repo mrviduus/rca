@@ -6,16 +6,27 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
 
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  NuGetDirectory: ${{ github.workspace }}/nuget
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
@@ -31,13 +42,15 @@ jobs:
       - name: Test
         run: dotnet test --configuration Release --no-build
 
-  package:
+  publish:
     runs-on: ubuntu-latest
     needs: build
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
@@ -48,31 +61,44 @@ jobs:
         run: |
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF#refs/tags/v}"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
           else
-            VERSION="0.1.${{ github.run_number }}"
+            VERSION="1.0.0.${{ github.run_number }}"
           fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Version set to: $VERSION"
+
+      - name: Update .csproj with Version
+        run: |
+          sed -i "s|<Version>.*</Version>|<Version>${{ env.VERSION }}</Version>|" src/Rca/Rca.csproj
+          echo "Updated version in .csproj to: ${{ env.VERSION }}"
+
+      - name: Restore
+        run: dotnet restore src/Rca/Rca.csproj
+
+      - name: Build
+        run: dotnet build src/Rca/Rca.csproj --configuration Release --no-restore
+
+      - name: Ensure NuGet Directory Exists
+        run: mkdir -p "${{ env.NuGetDirectory }}"
 
       - name: Pack
-        run: dotnet pack src/Rca/Rca.csproj -c Release -o ./artifacts /p:Version=${{ env.VERSION }}
+        run: dotnet pack src/Rca/Rca.csproj --configuration Release --no-build --output "${{ env.NuGetDirectory }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: nuget-package
-          path: ./artifacts/*.nupkg
+          path: ${{ env.NuGetDirectory }}/*.nupkg
 
       - name: Publish to NuGet
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          dotnet nuget push ./artifacts/*.nupkg \
-            --api-key ${{ secrets.NUGET_API_KEY }} \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        run: dotnet nuget push "${{ env.NuGetDirectory }}/*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
   release:
     runs-on: ubuntu-latest
-    needs: package
+    needs: publish
     if: startsWith(github.ref, 'refs/tags/')
 
     steps:
