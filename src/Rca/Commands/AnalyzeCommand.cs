@@ -50,7 +50,7 @@ public class AnalyzeCommand : Command
 
         using var client = ChatClientFactory.Create(provider, apiKey, model, timeout);
         var systemPrompt = await LoadPromptAsync();
-        var options = new ChatOptions { ModelId = model, MaxOutputTokens = 2048 };
+        var options = new ChatOptions { ModelId = model, MaxOutputTokens = 4096 };
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
 
         var results = new List<AnalysisResult>();
@@ -272,10 +272,16 @@ public class AnalyzeCommand : Command
 
         if (log.Logs?.Count > 0)
         {
-            sb.AppendLine("\nLogs:");
-            foreach (var entry in log.Logs)
+            // Send only Information+ level to LLM to reduce token count
+            // Trace/Debug logs (raw headers, Polly internals) add noise without value
+            var significantLogs = log.Logs
+                .Where(e => e.Level is "Information" or "Warning" or "Error" or "Critical")
+                .ToList();
+
+            sb.AppendLine($"\nLogs ({significantLogs.Count} of {log.Logs.Count} entries, filtered to Information+):");
+            foreach (var entry in significantLogs)
             {
-                sb.AppendLine($"[{entry.Level}] {entry.Category}: {entry.Message}");
+                sb.AppendLine($"[{entry.Timestamp}] [{entry.Level}] {entry.Category}: {entry.Message}");
             }
         }
 
