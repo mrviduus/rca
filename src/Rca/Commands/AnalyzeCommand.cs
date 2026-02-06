@@ -170,14 +170,12 @@ public class AnalyzeCommand : Command
             sb.AppendLine();
             sb.AppendLine("## Logs");
             sb.AppendLine("```");
-            foreach (var entry in log.Logs.Take(20))
+            foreach (var entry in log.Logs)
             {
                 sb.AppendLine($"[{entry.Timestamp}] [{entry.Level}] {entry.Category}: {entry.Message}");
                 if (!string.IsNullOrEmpty(entry.Exception))
                     sb.AppendLine($"  Exception: {entry.Exception}");
             }
-            if (log.Logs.Count > 20)
-                sb.AppendLine($"... and {log.Logs.Count - 20} more");
             sb.AppendLine("```");
         }
 
@@ -275,7 +273,7 @@ public class AnalyzeCommand : Command
         if (log.Logs?.Count > 0)
         {
             sb.AppendLine("\nLogs:");
-            foreach (var entry in log.Logs.Take(30))
+            foreach (var entry in log.Logs)
             {
                 sb.AppendLine($"[{entry.Level}] {entry.Category}: {entry.Message}");
             }
