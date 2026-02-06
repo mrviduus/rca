@@ -24,7 +24,7 @@ public static class ChatClientFactory
     {
         var key = apiKey ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY")
             ?? throw new InvalidOperationException("OPENAI_API_KEY required");
-        return new ChatClient(model ?? "gpt-4o", key).AsIChatClient();
+        return new ChatClient(model ?? "gpt-5-nano", key).AsIChatClient();
     }
 
     private static IChatClient CreateClaude(string? apiKey, string? model)
