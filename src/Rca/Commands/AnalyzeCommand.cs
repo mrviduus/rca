@@ -36,26 +36,43 @@ public class AnalyzeCommand : Command
             return;
         }
 
-        Console.WriteLine($"Found {logs.Count} failed test(s). Analyzing with {provider}...");
+        Console.WriteLine($"Found {logs.Count} failed test(s). Analyzing with {provider}...\n");
 
         using var client = ChatClientFactory.Create(provider, apiKey, model);
         var systemPrompt = await LoadPromptAsync();
-        var userPrompt = BuildUserPrompt(logs);
+        var options = new ChatOptions { ModelId = model, MaxOutputTokens = 2048 };
 
-        var messages = new List<ChatMessage>
+        var report = new StringBuilder();
+        report.AppendLine("# RCA Report\n");
+
+        for (var i = 0; i < logs.Count; i++)
         {
-            new(ChatRole.System, systemPrompt),
-            new(ChatRole.User, userPrompt)
-        };
+            var log = logs[i];
+            Console.WriteLine($"[{i + 1}/{logs.Count}] {log.TestName}");
 
-        var options = new ChatOptions { ModelId = model, MaxOutputTokens = 4096 };
-        var response = await client.GetResponseAsync(messages, options);
-        var result = response.Text;
+            var userPrompt = BuildTestPrompt(log);
+            var messages = new List<ChatMessage>
+            {
+                new(ChatRole.System, systemPrompt),
+                new(ChatRole.User, userPrompt)
+            };
+
+            var response = await client.GetResponseAsync(messages, options);
+
+            report.AppendLine($"## {log.TestName}");
+            report.AppendLine();
+            report.AppendLine(response.Text);
+            report.AppendLine();
+            report.AppendLine("---");
+            report.AppendLine();
+        }
+
+        var result = report.ToString();
 
         if (!string.IsNullOrEmpty(output))
         {
             await File.WriteAllTextAsync(output, result);
-            Console.WriteLine($"Report saved to {output}");
+            Console.WriteLine($"\nReport saved to {output}");
         }
         else
         {
@@ -91,21 +108,14 @@ public class AnalyzeCommand : Command
         return logs;
     }
 
-    private static string BuildUserPrompt(List<FailedTestLog> logs)
+    private static string BuildTestPrompt(FailedTestLog log)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Analyze these failed tests:\n");
-
-        foreach (var log in logs)
-        {
-            sb.AppendLine($"## {log.TestName}");
-            sb.AppendLine($"Class: {log.ClassName}");
-            sb.AppendLine($"Error: {log.ErrorMessage}");
-            if (!string.IsNullOrEmpty(log.StackTrace))
-                sb.AppendLine($"Stack:\n{log.StackTrace}");
-            sb.AppendLine();
-        }
-
+        sb.AppendLine($"Test: {log.TestName}");
+        sb.AppendLine($"Class: {log.ClassName}");
+        sb.AppendLine($"Error: {log.ErrorMessage}");
+        if (!string.IsNullOrEmpty(log.StackTrace))
+            sb.AppendLine($"Stack trace:\n{log.StackTrace}");
         return sb.ToString();
     }
 }
