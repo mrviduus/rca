@@ -48,7 +48,7 @@ public class AnalyzeCommand : Command
 
         Directory.CreateDirectory(outputDir);
 
-        using var client = ChatClientFactory.Create(provider, apiKey, model);
+        using var client = ChatClientFactory.Create(provider, apiKey, model, timeout);
         var systemPrompt = await LoadPromptAsync();
         var options = new ChatOptions { ModelId = model, MaxOutputTokens = 2048 };
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");

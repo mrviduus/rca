@@ -8,14 +8,14 @@ namespace Rca.Providers;
 
 public static class ChatClientFactory
 {
-    public static IChatClient Create(string provider, string? apiKey, string? model)
+    public static IChatClient Create(string provider, string? apiKey, string? model, int timeoutSeconds = 600)
     {
         return provider.ToLower() switch
         {
             "openai" => CreateOpenAi(apiKey, model),
             "claude" => CreateClaude(apiKey, model),
             "gemini" => CreateGemini(apiKey, model),
-            "ollama" => CreateOllama(model),
+            "ollama" => CreateOllama(model, timeoutSeconds),
             _ => throw new ArgumentException($"Unknown provider: {provider}")
         };
     }
@@ -46,8 +46,8 @@ public static class ChatClientFactory
         });
     }
 
-    private static IChatClient CreateOllama(string? model)
+    private static IChatClient CreateOllama(string? model, int timeoutSeconds)
     {
-        return new OllamaProvider(model ?? "llama3");
+        return new OllamaProvider(model ?? "llama3", timeoutSeconds: timeoutSeconds);
     }
 }
