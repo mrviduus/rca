@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/images/icon.png" alt="RCA" width="128" />
+</p>
+
 # RCA - Root Cause Analyzer
 
 CLI tool for analyzing failed test logs using LLM providers.
@@ -40,7 +44,7 @@ Options:
 
 | Provider | Env Variable | Default Model |
 |----------|--------------|---------------|
-| openai   | `OPENAI_API_KEY` | gpt-4o |
+| openai   | `OPENAI_API_KEY` | gpt-5-nano |
 | claude   | `ANTHROPIC_API_KEY` | claude-sonnet-4-20250514 |
 | gemini   | `GEMINI_API_KEY` | gemini-1.5-flash |
 | ollama   | - | llama3 |
