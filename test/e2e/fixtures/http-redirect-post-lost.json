@@ -1,0 +1,72 @@
+{
+  "traceId": "a1b2c3d4e5f6789012345678",
+  "testClass": "OrdersApiTests",
+  "testName": "PostOrder_ReturnsCreated",
+  "timestamp": "2026-02-05T14:32:11Z",
+  "failure": {
+    "messages": [
+      "Assert.Equal() Failure\nExpected: Created\nActual:   BadRequest"
+    ],
+    "stackTraces": [
+      "at OrdersApiTests.PostOrder_ReturnsCreated() in /src/Tests/OrdersApiTests.cs:line 47\nat System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)\nat System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)"
+    ]
+  },
+  "logs": [
+    {
+      "timestamp": "2026-02-05T14:32:10.101Z",
+      "level": "Information",
+      "category": "TestHost",
+      "message": "Starting test PostOrder_ReturnsCreated",
+      "exception": null
+    },
+    {
+      "timestamp": "2026-02-05T14:32:10.204Z",
+      "level": "Information",
+      "category": "System.Net.Http.HttpClient",
+      "message": "Sending POST request to https://api.example.com/api/v1/orders Content-Length: 256",
+      "exception": null
+    },
+    {
+      "timestamp": "2026-02-05T14:32:10.312Z",
+      "level": "Information",
+      "category": "System.Net.Http.HttpClient",
+      "message": "Received 308 PermanentRedirect from https://api.example.com/api/v1/orders Location: https://api.example.com/api/v2/orders",
+      "exception": null
+    },
+    {
+      "timestamp": "2026-02-05T14:32:10.315Z",
+      "level": "Debug",
+      "category": "System.Net.Http.HttpClient",
+      "message": "Auto-following redirect to https://api.example.com/api/v2/orders Content-Length: 0",
+      "exception": null
+    },
+    {
+      "timestamp": "2026-02-05T14:32:10.420Z",
+      "level": "Information",
+      "category": "System.Net.Http.HttpClient",
+      "message": "Sending POST request to https://api.example.com/api/v2/orders Content-Length: 0",
+      "exception": null
+    },
+    {
+      "timestamp": "2026-02-05T14:32:10.530Z",
+      "level": "Warning",
+      "category": "System.Net.Http.HttpClient",
+      "message": "Received 400 BadRequest from https://api.example.com/api/v2/orders",
+      "exception": null
+    },
+    {
+      "timestamp": "2026-02-05T14:32:10.531Z",
+      "level": "Error",
+      "category": "OrdersApiTests",
+      "message": "Response body: {\"error\":\"Request body is required\",\"code\":\"INVALID_REQUEST\"}",
+      "exception": null
+    },
+    {
+      "timestamp": "2026-02-05T14:32:10.533Z",
+      "level": "Error",
+      "category": "OrdersApiTests",
+      "message": "Assertion failed: Expected status 201 Created but received 400 BadRequest",
+      "exception": null
+    }
+  ]
+}

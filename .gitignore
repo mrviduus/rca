@@ -6,3 +6,4 @@ artifacts/
 .idea/
 *.DotSettings.user
 reports/
+test/e2e/output/
