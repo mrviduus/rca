@@ -5,3 +5,4 @@ artifacts/
 *.user
 .idea/
 *.DotSettings.user
+reports/
