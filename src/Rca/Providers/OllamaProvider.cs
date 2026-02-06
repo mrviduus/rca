@@ -13,9 +13,9 @@ public class OllamaProvider : IChatClient
 
     public ChatClientMetadata Metadata => new("ollama", new Uri(_baseUrl), _model);
 
-    public OllamaProvider(string model = "llama3", string baseUrl = "http://localhost:11434")
+    public OllamaProvider(string model = "llama3", string baseUrl = "http://localhost:11434", int timeoutSeconds = 600)
     {
-        _http = new HttpClient();
+        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
         _model = model;
         _baseUrl = baseUrl;
     }
