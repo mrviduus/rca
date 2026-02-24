@@ -41,8 +41,7 @@ public static class ChatClientFactory
         return new GeminiChatClient(new GeminiClientOptions
         {
             ApiKey = key,
-            ModelId = model ?? "gemini-1.5-flash",
-            ApiVersion = GeminiApiVersions.V1Beta
+            ModelId = model ?? "gemini-1.5-flash"
         });
     }
 
