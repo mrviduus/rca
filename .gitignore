@@ -7,3 +7,10 @@ artifacts/
 *.DotSettings.user
 reports/
 test/e2e/output/
+
+# Generated RCA output
+rca-*.md
+index-*.md
+
+# Claude Code
+.claude/

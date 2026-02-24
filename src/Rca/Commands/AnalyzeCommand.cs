@@ -14,6 +14,10 @@ public class AnalyzeCommand : Command
     private const int DefaultTimeoutSeconds = 60;
     private const int MaxRetries = 3;
 
+    private const int ChunkCharThreshold = 40_000;
+    private const int ChunkCharSize      = 30_000;
+    private const int ChunkOverlapCount  = 10;
+
     private readonly Argument<string> _pathArg = new("path") { Description = "Path to logs directory or file" };
     private readonly Option<string> _providerOpt = new("--provider") { Description = "LLM provider (openai, claude, gemini, ollama)", DefaultValueFactory = _ => "openai" };
     private readonly Option<string?> _apiKeyOpt = new("--api-key") { Description = "API key (or use env var)" };
@@ -57,7 +61,7 @@ public class AnalyzeCommand : Command
         Directory.CreateDirectory(outputDir);
 
         using var client = ChatClientFactory.Create(provider, apiKey, model, timeout);
-        var systemPrompt = await LoadPromptAsync();
+        var (systemPrompt, chunkPrompt, synthesizePrompt) = await LoadPromptsAsync();
         var options = new ChatOptions { ModelId = model, MaxOutputTokens = 4096 };
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
 
@@ -71,7 +75,7 @@ public class AnalyzeCommand : Command
             await semaphore.WaitAsync(cts.Token);
             try
             {
-                var result = await AnalyzeWithRetryAsync(client, systemPrompt, options, log, timeout, cts.Token);
+                var result = await AnalyzeTestAsync(client, systemPrompt, chunkPrompt, synthesizePrompt, options, log, timeout, cts.Token);
                 var current = Interlocked.Increment(ref completed);
                 Console.WriteLine($"[{current}/{logs.Count}] {log.TestClass}.{log.TestName} - {(result.Success ? "✅" : "❌")}");
 
@@ -112,7 +116,61 @@ public class AnalyzeCommand : Command
         // else 0 (success)
     }
 
-    private async Task<AnalysisResult> AnalyzeWithRetryAsync(
+    private static async Task<AnalysisResult> AnalyzeTestAsync(
+        IChatClient client, string systemPrompt, string chunkPrompt, string synthesizePrompt,
+        ChatOptions options, FailedTestLog log, int timeoutSec, CancellationToken ct)
+    {
+        var significantLogs = GetSignificantLogs(log);
+        if (EstimateLogPayloadSize(significantLogs) > ChunkCharThreshold)
+            return await AnalyzeInChunksAsync(client, chunkPrompt, synthesizePrompt,
+                options, log, significantLogs, timeoutSec, ct);
+        return await AnalyzeWithRetryAsync(client, systemPrompt, options, log, timeoutSec, ct);
+    }
+
+    private static async Task<AnalysisResult> AnalyzeInChunksAsync(
+        IChatClient client, string chunkPrompt, string synthesizePrompt,
+        ChatOptions options, FailedTestLog log, List<LogEntry> significantLogs,
+        int timeoutSec, CancellationToken ct)
+    {
+        var chunks = BuildChunks(significantLogs, ChunkCharSize, ChunkOverlapCount);
+        var totalChars = EstimateLogPayloadSize(significantLogs);
+        Console.WriteLine($"  → {log.TestClass}.{log.TestName} — {totalChars:N0} chars, chunking ({chunks.Count} segments)...");
+
+        var partialAnalyses = new List<string>(chunks.Count);
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            var segNum = i + 1;
+            var sysPrompt = chunkPrompt
+                .Replace("{segmentNumber}", segNum.ToString())
+                .Replace("{totalSegments}", chunks.Count.ToString());
+
+            var messages = new List<ChatMessage>
+            {
+                new(ChatRole.System, sysPrompt),
+                new(ChatRole.User, BuildChunkUserPrompt(log, chunks[i], segNum, chunks.Count))
+            };
+
+            var r = await CallWithRetryAsync(client, messages, options, timeoutSec, ct);
+            if (!r.Success)
+                return new AnalysisResult(log, false, null, $"Chunk {segNum} failed: {r.Error}", null);
+
+            partialAnalyses.Add(r.Text!);
+            Console.WriteLine($"    Segment {segNum}/{chunks.Count} analyzed.");
+        }
+
+        Console.WriteLine($"    Running synthesis...");
+        var synthMessages = new List<ChatMessage>
+        {
+            new(ChatRole.System, synthesizePrompt),
+            new(ChatRole.User, BuildSynthesisUserPrompt(log, partialAnalyses))
+        };
+        var synthesis = await CallWithRetryAsync(client, synthMessages, options, timeoutSec, ct);
+        return synthesis.Success
+            ? new AnalysisResult(log, true, synthesis.Text!, null, null)
+            : new AnalysisResult(log, false, null, $"Synthesis failed: {synthesis.Error}", null);
+    }
+
+    private static async Task<AnalysisResult> AnalyzeWithRetryAsync(
         IChatClient client,
         string systemPrompt,
         ChatOptions options,
@@ -120,39 +178,139 @@ public class AnalyzeCommand : Command
         int timeoutSec,
         CancellationToken ct)
     {
-        var userPrompt = BuildTestPrompt(log);
         var messages = new List<ChatMessage>
         {
             new(ChatRole.System, systemPrompt),
-            new(ChatRole.User, userPrompt)
+            new(ChatRole.User, BuildTestPrompt(log))
         };
 
+        var r = await CallWithRetryAsync(client, messages, options, timeoutSec, ct);
+        return r.Success
+            ? new AnalysisResult(log, true, r.Text!, null, null)
+            : new AnalysisResult(log, false, null, r.Error!, null);
+    }
+
+    private static async Task<CallResult> CallWithRetryAsync(
+        IChatClient client, List<ChatMessage> messages,
+        ChatOptions options, int timeoutSec, CancellationToken ct)
+    {
         for (var attempt = 1; attempt <= MaxRetries; attempt++)
         {
             try
             {
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSec));
-
-                var response = await client.GetResponseAsync(messages, options, timeoutCts.Token);
-                return new AnalysisResult(log, true, response.Text, null, null);
+                using var tcts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                tcts.CancelAfter(TimeSpan.FromSeconds(timeoutSec));
+                var response = await client.GetResponseAsync(messages, options, tcts.Token);
+                return new CallResult(true, response.Text, null);
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
-                if (attempt == MaxRetries)
-                    return new AnalysisResult(log, false, null, ex.Message, null);
-
-                // Exponential backoff: 1s, 2s, 4s
+                if (attempt == MaxRetries) return new CallResult(false, null, ex.Message);
                 var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt - 1));
+                Console.WriteLine($"    ⚠ Attempt {attempt}/{MaxRetries} failed: {ex.Message}. Retrying in {delay.TotalSeconds:0}s...");
                 await Task.Delay(delay, ct);
             }
         }
+        return new CallResult(false, null, "Max retries exceeded");
+    }
 
-        return new AnalysisResult(log, false, null, "Max retries exceeded", null);
+    private static List<LogEntry> GetSignificantLogs(FailedTestLog log) =>
+        log.Logs?
+           .Where(e => e.Level is "Information" or "Warning" or "Error" or "Critical")
+           .ToList()
+        ?? [];
+
+    private static int EstimateLogPayloadSize(List<LogEntry> entries) =>
+        entries.Sum(e =>
+            e.Timestamp.Length + e.Level.Length + e.Category.Length +
+            e.Message.Length + (e.Exception?.Length ?? 0) + 10);
+
+    private static List<List<LogEntry>> BuildChunks(List<LogEntry> entries, int chunkCharSize, int overlapCount)
+    {
+        var chunks = new List<List<LogEntry>>();
+        var i = 0;
+        while (i < entries.Count)
+        {
+            var chunk = new List<LogEntry>();
+            var chars = 0;
+            for (var j = i; j < entries.Count; j++)
+            {
+                var sz = entries[j].Timestamp.Length + entries[j].Level.Length +
+                         entries[j].Category.Length + entries[j].Message.Length +
+                         (entries[j].Exception?.Length ?? 0) + 10;
+                if (chunk.Count > 0 && chars + sz > chunkCharSize) break;
+                chunk.Add(entries[j]);
+                chars += sz;
+            }
+            chunks.Add(chunk);
+            i += Math.Max(1, chunk.Count - overlapCount);
+        }
+        return chunks;
+    }
+
+    private static string BuildTestPrompt(FailedTestLog log)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"Test: {log.TestClass}.{log.TestName}");
+        sb.AppendLine($"TraceId: {log.TraceId}");
+        sb.AppendLine($"Error: {log.ErrorMessage}");
+
+        if (!string.IsNullOrEmpty(log.StackTrace))
+            sb.AppendLine($"Stack trace:\n{log.StackTrace}");
+
+        if (log.Logs?.Count > 0)
+        {
+            var significantLogs = GetSignificantLogs(log);
+            sb.AppendLine($"\nLogs ({significantLogs.Count} of {log.Logs.Count} entries, filtered to Information+):");
+            foreach (var entry in significantLogs)
+            {
+                sb.AppendLine($"[{entry.Timestamp}] [{entry.Level}] {entry.Category}: {entry.Message}");
+                if (!string.IsNullOrEmpty(entry.Exception))
+                    sb.AppendLine($"  Exception: {entry.Exception}");
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static string BuildChunkUserPrompt(FailedTestLog log, List<LogEntry> entries, int segNum, int totalSegs)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"Test: {log.TestClass}.{log.TestName}");
+        sb.AppendLine($"TraceId: {log.TraceId}");
+        sb.AppendLine($"Error: {log.ErrorMessage}");
+
+        if (!string.IsNullOrEmpty(log.StackTrace))
+            sb.AppendLine($"Stack trace:\n{log.StackTrace}");
+
+        sb.AppendLine($"\nLog segment {segNum} of {totalSegs} ({entries.Count} entries):");
+        foreach (var entry in entries)
+        {
+            sb.AppendLine($"[{entry.Timestamp}] [{entry.Level}] {entry.Category}: {entry.Message}");
+            if (!string.IsNullOrEmpty(entry.Exception))
+                sb.AppendLine($"  Exception: {entry.Exception}");
+        }
+
+        return sb.ToString();
+    }
+
+    private static string BuildSynthesisUserPrompt(FailedTestLog log, List<string> partialAnalyses)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"Test: {log.TestClass}.{log.TestName}");
+        sb.AppendLine($"Error: {log.ErrorMessage}");
+        sb.AppendLine();
+        sb.AppendLine($"The following are partial analyses from {partialAnalyses.Count} consecutive log segments:");
+
+        for (var i = 0; i < partialAnalyses.Count; i++)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"--- Segment {i + 1} Analysis ---");
+            sb.AppendLine(partialAnalyses[i]);
+        }
+
+        return sb.ToString();
     }
 
     private static string BuildReport(FailedTestLog log, string analysis)
@@ -232,11 +390,15 @@ public class AnalyzeCommand : Command
         return sanitized.ToString();
     }
 
-    private static async Task<string> LoadPromptAsync()
+    private static async Task<(string analyze, string analyzeChunk, string synthesize)> LoadPromptsAsync()
     {
         var dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
-        var path = Path.Combine(dir, "Prompts", "AnalyzePrompt.txt");
-        return await File.ReadAllTextAsync(path);
+        var p = Path.Combine(dir, "Prompts");
+        return (
+            await File.ReadAllTextAsync(Path.Combine(p, "AnalyzePrompt.txt")),
+            await File.ReadAllTextAsync(Path.Combine(p, "AnalyzeChunkPrompt.txt")),
+            await File.ReadAllTextAsync(Path.Combine(p, "SynthesizePrompt.txt"))
+        );
     }
 
     private static async Task<List<FailedTestLog>> LoadLogsAsync(string path)
@@ -268,34 +430,6 @@ public class AnalyzeCommand : Command
         return logs;
     }
 
-    private static string BuildTestPrompt(FailedTestLog log)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine($"Test: {log.TestClass}.{log.TestName}");
-        sb.AppendLine($"TraceId: {log.TraceId}");
-        sb.AppendLine($"Error: {log.ErrorMessage}");
-
-        if (!string.IsNullOrEmpty(log.StackTrace))
-            sb.AppendLine($"Stack trace:\n{log.StackTrace}");
-
-        if (log.Logs?.Count > 0)
-        {
-            // Send only Information+ level to LLM to reduce token count
-            // Trace/Debug logs (raw headers, Polly internals) add noise without value
-            var significantLogs = log.Logs
-                .Where(e => e.Level is "Information" or "Warning" or "Error" or "Critical")
-                .ToList();
-
-            sb.AppendLine($"\nLogs ({significantLogs.Count} of {log.Logs.Count} entries, filtered to Information+):");
-            foreach (var entry in significantLogs)
-            {
-                sb.AppendLine($"[{entry.Timestamp}] [{entry.Level}] {entry.Category}: {entry.Message}");
-            }
-        }
-
-        return sb.ToString();
-    }
-
     private record AnalysisResult(
         FailedTestLog Log,
         bool Success,
@@ -303,4 +437,6 @@ public class AnalyzeCommand : Command
         string? Error,
         string? ReportFile
     );
+
+    private record CallResult(bool Success, string? Text, string? Error);
 }
