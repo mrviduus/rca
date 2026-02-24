@@ -2,6 +2,6 @@ using System.CommandLine;
 using Rca.Commands;
 
 var root = new RootCommand("RCA - Root Cause Analyzer for failed tests");
-root.AddCommand(new AnalyzeCommand());
+root.Add(new AnalyzeCommand());
 
-return await root.InvokeAsync(args);
+return await root.Parse(args).InvokeAsync();

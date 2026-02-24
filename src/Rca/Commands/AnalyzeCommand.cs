@@ -14,29 +14,37 @@ public class AnalyzeCommand : Command
     private const int DefaultTimeoutSeconds = 60;
     private const int MaxRetries = 3;
 
+    private readonly Argument<string> _pathArg = new("path") { Description = "Path to logs directory or file" };
+    private readonly Option<string> _providerOpt = new("--provider") { Description = "LLM provider (openai, claude, gemini, ollama)", DefaultValueFactory = _ => "openai" };
+    private readonly Option<string?> _apiKeyOpt = new("--api-key") { Description = "API key (or use env var)" };
+    private readonly Option<string?> _modelOpt = new("--model") { Description = "Model override" };
+    private readonly Option<string> _outputDirOpt = new("--output-dir") { Description = "Output directory for reports", DefaultValueFactory = _ => "." };
+    private readonly Option<int> _parallelOpt = new("--parallel") { Description = "Max parallel API calls", DefaultValueFactory = _ => DefaultParallel };
+    private readonly Option<int> _timeoutOpt = new("--timeout") { Description = "Timeout per API call (seconds)", DefaultValueFactory = _ => DefaultTimeoutSeconds };
+
     public AnalyzeCommand() : base("analyze", "Analyze failed test logs using LLM")
     {
-        var pathArg = new Argument<string>("path", "Path to logs directory or file");
-        var providerOpt = new Option<string>("--provider", () => "openai", "LLM provider (openai, claude, gemini, ollama)");
-        var apiKeyOpt = new Option<string?>("--api-key", "API key (or use env var)");
-        var modelOpt = new Option<string?>("--model", "Model override");
-        var outputDirOpt = new Option<string>("--output-dir", () => ".", "Output directory for reports");
-        var parallelOpt = new Option<int>("--parallel", () => DefaultParallel, "Max parallel API calls");
-        var timeoutOpt = new Option<int>("--timeout", () => DefaultTimeoutSeconds, "Timeout per API call (seconds)");
+        Add(_pathArg);
+        Add(_providerOpt);
+        Add(_apiKeyOpt);
+        Add(_modelOpt);
+        Add(_outputDirOpt);
+        Add(_parallelOpt);
+        Add(_timeoutOpt);
 
-        AddArgument(pathArg);
-        AddOption(providerOpt);
-        AddOption(apiKeyOpt);
-        AddOption(modelOpt);
-        AddOption(outputDirOpt);
-        AddOption(parallelOpt);
-        AddOption(timeoutOpt);
-
-        this.SetHandler(ExecuteAsync, pathArg, providerOpt, apiKeyOpt, modelOpt, outputDirOpt, parallelOpt, timeoutOpt);
+        SetAction(ExecuteAsync);
     }
 
-    private async Task ExecuteAsync(string path, string provider, string? apiKey, string? model, string outputDir, int parallel, int timeout)
+    private async Task ExecuteAsync(ParseResult parseResult, CancellationToken cancellationToken)
     {
+        var path = parseResult.GetValue(_pathArg)!;
+        var provider = parseResult.GetValue(_providerOpt)!;
+        var apiKey = parseResult.GetValue(_apiKeyOpt);
+        var model = parseResult.GetValue(_modelOpt);
+        var outputDir = parseResult.GetValue(_outputDirOpt)!;
+        var parallel = parseResult.GetValue(_parallelOpt);
+        var timeout = parseResult.GetValue(_timeoutOpt);
+
         var logs = await LoadLogsAsync(path);
         if (logs.Count == 0)
         {
